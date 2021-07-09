@@ -101,7 +101,12 @@ declare module "react-native-zendesk-chat" {
 		/**
 		 * Check if there are available agents
 		 */
-		areAgentsOnline: () => Promise<Boolean>;
+		areAgentsOnline: () => Promise<boolean>;
+
+		/**
+		 * Check if there is an ongoing conversation
+		 */
+		isChatting: () => Promise<boolean>;
 	}
 
 	const RNZendeskChatModule: RNZendeskChatModuleImpl;

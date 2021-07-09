@@ -19,6 +19,7 @@ import zendesk.chat.AccountStatus;
 import zendesk.chat.Chat;
 import zendesk.chat.ChatConfiguration;
 import zendesk.chat.ChatEngine;
+import zendesk.chat.ChatInfo;
 import zendesk.chat.ChatSessionStatus;
 import zendesk.chat.ChatState;
 import zendesk.chat.ObservationScope;
@@ -408,4 +409,19 @@ public class RNZendeskChatModule extends ReactContextBaseJavaModule {
             }
         });
     }
+
+	@ReactMethod
+	public void isChatting(final Promise promise) {
+        Chat.INSTANCE.providers().chatProvider().getChatInfo(new ZendeskCallback<ChatInfo>() {
+            @Override
+            public void onSuccess(ChatInfo chatInfo) {
+                promise.resolve(chatInfo.isChatting());
+            }
+
+            @Override
+            public void onError(ErrorResponse errorResponse) {
+                promise.reject("ZDKChat failed to get the chatInfo", errorResponse.getReason());
+            }
+        });
+	}
 }
