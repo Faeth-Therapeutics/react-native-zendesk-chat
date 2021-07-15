@@ -20,10 +20,7 @@ import zendesk.chat.Chat;
 import zendesk.chat.ChatConfiguration;
 import zendesk.chat.ChatEngine;
 import zendesk.chat.ChatInfo;
-import zendesk.chat.ChatSessionStatus;
-import zendesk.chat.ChatState;
-import zendesk.chat.ObservationScope;
-import zendesk.chat.Observer;
+import zendesk.chat.ChatProvidersConfiguration;
 import zendesk.chat.ProfileProvider;
 import zendesk.chat.PreChatFormFieldStatus;
 import zendesk.chat.PushNotificationsProvider;
@@ -40,9 +37,6 @@ public class RNZendeskChatModule extends ReactContextBaseJavaModule {
     private static final String TAG = "[RNZendeskChatModule]";
 
     private ArrayList<String> currentUserTags = new ArrayList();
-
-    private ReadableMap pendingVisitorInfo = null;
-    private ObservationScope observationScope = null;
 
     // private class Converters {
     public static ArrayList<String> getArrayListOfStrings(ReadableMap options, String key, String functionHint) {
@@ -310,35 +304,29 @@ public class RNZendeskChatModule extends ReactContextBaseJavaModule {
                     "Zendesk Internals are undefined -- did you forget to call RNZendeskModule.init(<account_key>)?");
             return;
         }
-        pendingVisitorInfo = null;
-        boolean didSetVisitorInfo = _setVisitorInfo(options);
 
-        ReadableMap flagHash = RNZendeskChatModule.getReadableMap(options, "behaviorFlags", "startChat");
+        ReadableMap behaviorFlags = RNZendeskChatModule.getReadableMap(options, "behaviorFlags", "startChat");
+        ChatConfiguration chatConfig = loadBehaviorFlags(ChatConfiguration.builder(), behaviorFlags).build();
 
-        boolean showPreChatForm = getBooleanOrDefault(flagHash, "showPreChatForm", "startChat(behaviorFlags)", true);
-        boolean needsToSetVisitorInfoAfterChatStart = showPreChatForm && didSetVisitorInfo;
-
-        ChatConfiguration.Builder chatBuilder = loadBehaviorFlags(ChatConfiguration.builder(), flagHash);
-        if (showPreChatForm) {
-            ReadableMap preChatFormOptions = getReadableMap(options, "preChatFormOptions", "startChat");
-            chatBuilder = loadPreChatFormConfiguration(chatBuilder, preChatFormOptions);
-            pendingVisitorInfo = hiddenVisitorInfoData(options, preChatFormOptions);
-        }
-        ChatConfiguration chatConfig = chatBuilder.build();
-
-        String department = RNZendeskChatModule.getStringOrNull(options, "department", "startChat");
-        if (department != null) {
-            Chat.INSTANCE.providers().chatProvider().setDepartment(department, null);
-        }
+        // Zendesk SDK v3.2.0 allows merging pre-chat form data with visitor info without overwriting anything.
+        // See: https://developer.zendesk.com/documentation/classic-sdks/chat-sdk-v2/android/getting-started/#setting-information-for-the-chat-session
+        VisitorInfo visitorInfo = VisitorInfo.builder()
+                .withName(getStringOrNull(options, "name", "startChat"))
+                .withEmail(getStringOrNull(options, "email", "startChat"))
+                .withPhoneNumber(getStringOrNull(options, "phone", "startChat"))
+                .build();
+        String department = getStringOrNull(options, "department", "startChat");
+        ChatProvidersConfiguration chatProvidersConfiguration = ChatProvidersConfiguration.builder()
+                .withVisitorInfo(visitorInfo)
+                .withDepartment(department)
+                .build();
+        Chat.INSTANCE.setChatProvidersConfiguration(chatProvidersConfiguration);
 
         loadTags(options);
 
+        ReadableMap messagingOptions = RNZendeskChatModule.getReadableMap(options, "messagingOptions", "startChat");
         MessagingConfiguration.Builder messagingBuilder = loadBotSettings(
-                getReadableMap(options, "messagingOptions", "startChat"), MessagingActivity.builder());
-
-        if (needsToSetVisitorInfoAfterChatStart) {
-            setupChatStartObserverToSetVisitorInfo();
-        }
+                messagingOptions, MessagingActivity.builder());
 
         Activity activity = getCurrentActivity();
         if (activity != null) {
@@ -355,34 +343,6 @@ public class RNZendeskChatModule extends ReactContextBaseJavaModule {
         if (pushProvider != null) {
             pushProvider.registerPushToken(token);
         }
-    }
-
-    // https://support.zendesk.com/hc/en-us/articles/360055343673
-    public void setupChatStartObserverToSetVisitorInfo(){
-        // Create a temporary observation scope until the chat is started.
-        observationScope = new ObservationScope();
-        Chat.INSTANCE.providers().chatProvider().observeChatState(observationScope, new Observer<ChatState>() {
-            @Override
-            public void update(ChatState chatState) {
-                ChatSessionStatus chatStatus = chatState.getChatSessionStatus();
-                // Status achieved after the PreChatForm is completed
-                if (chatStatus == ChatSessionStatus.STARTED) {
-                    observationScope.cancel(); // Once the chat is started disable the observation
-                    observationScope = null; // Clean things up to avoid confusion.
-                    if (pendingVisitorInfo == null) { return; }
-
-                    // Update the information MID chat here. All info but Department can be updated
-                    // Add here the code to set the selected visitor info *after* the preChatForm is complete
-                    _setVisitorInfo(pendingVisitorInfo);
-                    pendingVisitorInfo = null;
-
-                    Log.d(TAG, "Set the VisitorInfo after chat start");
-                } else {
-                    // There are few other statuses that you can observe but they are unused in this example
-                    Log.d(TAG, "[observerSetup] - ChatSessionUpdate -> (unused) status : " + chatStatus.toString());
-                }
-            }
-        });
     }
 
     @ReactMethod
@@ -410,8 +370,8 @@ public class RNZendeskChatModule extends ReactContextBaseJavaModule {
         });
     }
 
-	@ReactMethod
-	public void isChatting(final Promise promise) {
+    @ReactMethod
+    public void isChatting(final Promise promise) {
         Chat.INSTANCE.providers().chatProvider().getChatInfo(new ZendeskCallback<ChatInfo>() {
             @Override
             public void onSuccess(ChatInfo chatInfo) {
@@ -423,5 +383,5 @@ public class RNZendeskChatModule extends ReactContextBaseJavaModule {
                 promise.reject("ZDKChat failed to get the chatInfo", errorResponse.getReason());
             }
         });
-	}
+    }
 }
